@@ -9,14 +9,6 @@ import {
   N8nNode,
 } from './n8nService';
 
-// Find the node that outputs context (contains intent_agent, conversational_agent_output, etc.)
-function findContextNode(nodes: N8nNode[]): N8nNode | null {
-  // Look for nodes that might contain context data
-  // Common patterns: Set node, Function node, or nodes before SQL execution
-  // We'll need to inspect the workflow to identify this
-  // For now, return null and let the analysis function handle it
-  return null;
-}
 
 // Find the Execute SQL node
 function findSqlNode(nodes: N8nNode[]): N8nNode | null {
@@ -55,12 +47,14 @@ function analyzeWorkflowStructure(workflow: N8nWorkflow): {
   if (sqlNode && workflow.connections) {
     // Find which node connects to the SQL node (this should be the context node)
     for (const [nodeId, connections] of Object.entries(workflow.connections)) {
-      if (connections.main && Array.isArray(connections.main)) {
-        for (const outputConnections of connections.main) {
+      const connData = connections as { main?: unknown[][] };
+      if (connData.main && Array.isArray(connData.main)) {
+        for (const outputConnections of connData.main) {
           if (Array.isArray(outputConnections)) {
             for (const conn of outputConnections) {
-              if (conn.node === sqlNode.id) {
-                const sourceNode = workflow.nodes.find(n => n.id === nodeId);
+              const connObj = conn as { node?: string };
+              if (connObj.node === sqlNode.id) {
+                const sourceNode = workflow.nodes.find((n: N8nNode) => n.id === nodeId);
                 if (sourceNode) {
                   // This is likely the context node (the one feeding into SQL)
                   // It should be the node that contains intent_agent, conversational_agent_output, etc.
@@ -93,8 +87,8 @@ function analyzeWorkflowStructure(workflow: N8nWorkflow): {
       // If SQL node position is known, find the closest node before it
       if (sqlNode?.position) {
         const beforeSql = contextCandidates
-          .filter(n => n.position && n.position[0] < sqlNode.position[0])
-          .sort((a, b) => (b.position?.[0] || 0) - (a.position?.[0] || 0));
+          .filter((n: N8nNode) => n.position && n.position[0] < sqlNode.position[0])
+          .sort((a: N8nNode, b: N8nNode) => (b.position?.[0] || 0) - (a.position?.[0] || 0));
         if (beforeSql.length > 0) {
           contextNodeName = beforeSql[0].name;
         }

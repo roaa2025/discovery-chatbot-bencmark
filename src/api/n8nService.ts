@@ -1,7 +1,7 @@
 // n8n API service for programmatic workflow and node creation
 // Uses n8n REST API with API key authentication
 
-interface N8nWorkflow {
+export interface N8nWorkflow {
   id?: string;
   name: string;
   nodes: N8nNode[];
@@ -10,7 +10,7 @@ interface N8nWorkflow {
   settings?: Record<string, any>;
 }
 
-interface N8nNode {
+export interface N8nNode {
   id: string;
   name: string;
   type: string;
@@ -18,14 +18,6 @@ interface N8nNode {
   position: [number, number];
   parameters?: Record<string, any>;
   credentials?: Record<string, any>;
-}
-
-interface N8nApiResponse<T> {
-  data?: T;
-  error?: {
-    message: string;
-    code?: string;
-  };
 }
 
 // Get n8n base URL and API key from environment variables
@@ -213,7 +205,7 @@ export function createSetNode(
 export function createConnection(
   fromNode: string,
   toNode: string,
-  outputIndex: number = 0,
+  _outputIndex: number = 0,
   inputIndex: number = 0
 ): Record<string, any> {
   return {
