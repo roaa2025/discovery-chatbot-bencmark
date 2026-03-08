@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HF Summarization Benchmark</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f1117;
+            color: #e4e4e7;
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* === HEADER === */
+        .header {
+            background: #1a1d29;
+            border: 1px solid #2d2d3a;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: #00d4aa;
+            margin-bottom: 8px;
+        }
+
+        .header .subtitle {
+            color: #9ca3af;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .token-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .token-input {
+            flex: 1;
+            max-width: 500px;
+            padding: 10px 14px;
+            background: #0f1117;
+            border: 1px solid #2d2d3a;
+            border-radius: 6px;
+            color: #e4e4e7;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+        }
+
+        .token-input:focus {
+            outline: none;
+            border-color: #00d4aa;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background: #00d4aa;
+            color: #0f1117;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #00b894;
+        }
+
+        .btn:disabled {
+            background: #2d2d3a;
+            color: #6b7280;
+            cursor: not-allowed;
+        }
+
+        .token-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #6b7280;
+        }
+
+        .status-dot.active {
+            background: #00d4aa;
+            box-shadow: 0 0 8px rgba(0, 212, 170, 0.5);
+        }
+
+        /* === TEST CONFIGURATION === */
+        .config-panel {
+            background: #1a1d29;
+            border: 1px solid #2d2d3a;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .config-panel h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #e4e4e7;
+        }
+
+        .test-cases-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .test-case-card {
+            background: #0f1117;
+            border: 2px solid #2d2d3a;
+            border-radius: 6px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .test-case-card:hover {
+            border-color: #00d4aa;
+        }
+
+        .test-case-card.selected {
+            border-color: #00d4aa;
+            background: #0a1a1a;
+        }
+
+        .test-case-card input[type="checkbox"] {
+            margin-right: 10px;
+            cursor: pointer;
+        }
+
+        .test-case-card label {
+            font-weight: 600;
+            color: #00d4aa;
+            display: block;
+            margin-bottom: 6px;
+            cursor: pointer;
+        }
+
+        .test-case-card .description {
+            font-size: 13px;
+            color: #9ca3af;
+            margin-bottom: 8px;
+        }
+
+        .test-case-card .preview {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: #6b7280;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .select-all-btn {
+            margin-bottom: 16px;
+        }
+
+        .run-btn {
+            width: 100%;
+            padding: 16px;
+            font-size: 16px;
+            background: #00d4aa;
+            color: #0f1117;
+            border: none;
+            border-radius: 6px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .run-btn:hover:not(:disabled) {
+            background: #00b894;
+        }
+
+        /* === PROGRESS GRID === */
+        .progress-section {
+            background: #1a1d29;
+            border: 1px solid #2d2d3a;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .progress-section.active {
+            display: block;
+        }
+
+        .progress-grid {
+            display: grid;
+            grid-template-columns: 200px repeat(4, 1fr);
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .progress-header {
+            font-weight: 600;
+            color: #9ca3af;
+            padding: 8px;
+        }
+
+        .progress-cell {
+            padding: 12px;
+            background: #0f1117;
+            border: 1px solid #2d2d3a;
+            border-radius: 4px;
+            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .progress-cell.running {
+            animation: pulse 1.5s ease-in-out infinite;
+            color: #00d4aa;
+        }
+
+        .progress-cell.success {
+            color: #00d4aa;
+        }
+
+        .progress-cell.error {
+            color: #ef4444;
+        }
+
+        .progress-cell.timeout {
+            color: #f59e0b;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* === RESULTS TABLE === */
+        .results-section {
+            background: #1a1d29;
+            border: 1px solid #2d2d3a;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .results-section.active {
+            display: block;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin-top: 16px;
+        }
+
+        .results-table th {
+            background: #0f1117;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #9ca3af;
+            border-bottom: 2px solid #2d2d3a;
+            position: sticky;
+            top: 0;
+        }
+
+        .results-table td {
+            padding: 12px;
+            border-bottom: 1px solid #2d2d3a;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .results-table tr:hover {
+            background: #0f1117;
+        }
+
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .status-badge.success {
+            background: #00d4aa20;
+            color: #00d4aa;
+        }
+
+        .status-badge.error {
+            background: #ef444420;
+            color: #ef4444;
+        }
+
+        .status-badge.timeout {
+            background: #f59e0b20;
+            color: #f59e0b;
+        }
+
+        .latency {
+            font-weight: 600;
+        }
+
+        .latency.fast {
+            color: #00d4aa;
+        }
+
+        .latency.medium {
+            color: #f59e0b;
+        }
+
+        .latency.slow {
+            color: #ef4444;
+        }
+
+        .quality-bar {
+            width: 100px;
+            height: 8px;
+            background: #2d2d3a;
+            border-radius: 4px;
+            overflow: hidden;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .quality-fill {
+            height: 100%;
+            background: #00d4aa;
+            transition: width 0.3s;
+        }
+
+        .quality-fill.medium {
+            background: #f59e0b;
+        }
+
+        .quality-fill.low {
+            background: #ef4444;
+        }
+
+        .output-preview {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: pointer;
+            color: #00d4aa;
+        }
+
+        .output-preview:hover {
+            text-decoration: underline;
+        }
+
+        /* === SUMMARY SECTION === */
+        .summary-section {
+            background: #1a1d29;
+            border: 1px solid #2d2d3a;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .summary-section.active {
+            display: block;
+        }
+
+        .strategy-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin-top: 20px;
+        }
+
+        .strategy-card {
+            background: #0f1117;
+            border: 1px solid #2d2d3a;
+            border-radius: 6px;
+            padding: 20px;
+        }
+
+        .strategy-card h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #00d4aa;
+            margin-bottom: 12px;
+        }
+
+        .strategy-metric {
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .strategy-metric label {
+            color: #9ca3af;
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .strategy-metric value {
+            color: #e4e4e7;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .verdict {
+            margin-top: 24px;
+            padding: 16px;
+            background: #0f1117;
+            border-left: 4px solid #00d4aa;
+            border-radius: 4px;
+            font-size: 15px;
+            line-height: 1.8;
+        }
+
+        /* === OUTPUT INSPECTOR === */
+        .inspector-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            overflow-y: auto;
+            padding: 40px;
+        }
+
+        .inspector-overlay.active {
+            display: block;
+        }
+
+        .inspector-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #1a1d29;
+            border: 1px solid #2d2d3a;
+            border-radius: 8px;
+            padding: 24px;
+        }
+
+        .inspector-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .inspector-header h2 {
+            color: #00d4aa;
+            font-size: 20px;
+        }
+
+        .close-btn {
+            background: #2d2d3a;
+            border: none;
+            color: #e4e4e7;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .close-btn:hover {
+            background: #3d3d4a;
+        }
+
+        .inspector-section {
+            margin-bottom: 24px;
+        }
+
+        .inspector-section h3 {
+            color: #9ca3af;
+            font-size: 14px;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .text-box {
+            background: #0f1117;
+            border: 1px solid #2d2d3a;
+            border-radius: 4px;
+            padding: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .diff-highlight {
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+
+        .diff-removed {
+            background: #ef444420;
+            color: #ef4444;
+            text-decoration: line-through;
+        }
+
+        .diff-added {
+            background: #f59e0b20;
+            color: #f59e0b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- === HEADER === -->
+        <div class="header">
+            <h1>HF Summarization Benchmark</h1>
+            <div class="subtitle">Data_Discovery workflow · `hf_summarize_api` node evaluation</div>
+            <div class="token-section">
+                <input type="password" class="token-input" id="hfToken" placeholder="Enter HuggingFace API Token">
+                <button class="btn" id="setTokenBtn">Set Token</button>
+                <div class="token-status">
+                    <div class="status-dot" id="tokenStatusDot"></div>
+                    <span id="tokenStatusText">No token set</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- === TEST CONFIGURATION === -->
+        <div class="config-panel">
+            <h2>Test Configuration</h2>
+            <button class="btn select-all-btn" id="selectAllBtn">Select All</button>
+            <div class="test-cases-grid" id="testCasesGrid"></div>
+            <button class="run-btn" id="runBenchmarkBtn" disabled>Run Benchmark</button>
+        </div>
+
+        <!-- === PROGRESS GRID === -->
+        <div class="progress-section" id="progressSection">
+            <h2>Progress</h2>
+            <div class="progress-grid" id="progressGrid"></div>
+        </div>
+
+        <!-- === RESULTS TABLE === -->
+        <div class="results-section" id="resultsSection">
+            <h2>Results</h2>
+            <table class="results-table" id="resultsTable">
+                <thead>
+                    <tr>
+                        <th>Test Case</th>
+                        <th>Strategy</th>
+                        <th>Status</th>
+                        <th>Input Tokens</th>
+                        <th>Output Tokens</th>
+                        <th>Compression</th>
+                        <th>Latency (ms)</th>
+                        <th>Error</th>
+                        <th>Summarized?</th>
+                        <th>Quality Score</th>
+                        <th>Output Preview</th>
+                    </tr>
+                </thead>
+                <tbody id="resultsTableBody"></tbody>
+            </table>
+        </div>
+
+        <!-- === SUMMARY SECTION === -->
+        <div class="summary-section" id="summarySection">
+            <h2>Summary & Verdict</h2>
+            <div class="strategy-cards" id="strategyCards"></div>
+            <div class="verdict" id="verdict"></div>
+        </div>
+    </div>
+
+    <!-- === OUTPUT INSPECTOR === -->
+    <div class="inspector-overlay" id="inspectorOverlay">
+        <div class="inspector-content">
+            <div class="inspector-header">
+                <h2>Output Inspector</h2>
+                <button class="close-btn" id="closeInspectorBtn">Close</button>
+            </div>
+            <div id="inspectorContent"></div>
+        </div>
+    </div>
+
+    <script>
+        /* === CONFIGURATION === */
+        const STRATEGIES = [
+            { id: 'falconsai', label: 'Falconsai (current)', url: 'https://router.huggingface.co/hf-inference/models/Falconsai/text_summarization' },
+            { id: 'distilbart', label: 'DistilBART', url: 'https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6' },
+            { id: 'bart_large', label: 'BART Large CNN', url: 'https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn' },
+            { id: 'code_only', label: 'Code-Only (no HF)', url: null }
+        ];
+
+        const TEST_CASES = [
+            {
+                id: "tc1",
+                label: "Short history — 2 older topics",
+                description: "User explored 2 unrelated topics earlier",
+                input: "Earlier in this conversation, the user asked about: Do you have data on employment rates?; Show me GDP indicators for Jordan. Detected intents/topics: INVENTORY_DISCOVERY, GDP."
+            },
+            {
+                id: "tc2",
+                label: "Medium history — 4 topics with intents",
+                description: "User explored labor and trade data",
+                input: "Earlier in this conversation, the user asked about: I need unemployment data by governorate; Show me labor force participation for 2022; Do you have export data for Jordan?; Which datasets cover trade by product category?. Detected intents/topics: DATASET_DISCOVERY, Unemployment Rate, Labor Force Participation, INVENTORY_DISCOVERY, Export Value."
+            },
+            {
+                id: "tc3",
+                label: "Long history — 6 topics mixed intents",
+                description: "Complex multi-domain session",
+                input: "Earlier in this conversation, the user asked about: What dashboards do you have for economic indicators?; I need a dataset on consumer price index; Show me population data by district for 2021; Do you have PDF reports on education spending?; Which datasets contain health indicators?; I want to download the poverty rate dataset. Detected intents/topics: READY_REPORTS, DATASET_DISCOVERY, Consumer Price Index, Population, DOCUMENT_DISCOVERY, Education Spending, INVENTORY_DISCOVERY, Health Indicators, Poverty Rate."
+            },
+            {
+                id: "tc4",
+                label: "Single topic — narrow focused session",
+                description: "User only asked about one thing earlier",
+                input: "Earlier in this conversation, the user asked about: Show me the highest average wage by sector in 2022. Detected intents/topics: FACT_RETRIEVAL, Average Wage."
+            },
+            {
+                id: "tc5",
+                label: "Edge case — empty / very short older history",
+                description: "Barely any older history to summarize",
+                input: "Earlier in this conversation, the user asked about: hi. Detected intents/topics: AMBIGUOUS."
+            }
+        ];
+
+        /* === STATE === */
+        let hfToken = '';
+        let selectedTestCases = new Set();
+        let allResults = [];
+
+        /* === INITIALIZATION === */
+        function init() {
+            renderTestCases();
+            setupEventListeners();
+        }
+
+        function renderTestCases() {
+            const grid = document.getElementById('testCasesGrid');
+            grid.innerHTML = '';
+            TEST_CASES.forEach(tc => {
+                const card = document.createElement('div');
+                card.className = 'test-case-card';
+                card.innerHTML = `
+                    <input type="checkbox" id="tc_${tc.id}" data-tc-id="${tc.id}">
+                    <label for="tc_${tc.id}">${tc.label}</label>
+                    <div class="description">${tc.description}</div>
+                    <div class="preview">${tc.input.substring(0, 100)}...</div>
+                `;
+                card.addEventListener('click', (e) => {
+                    if (e.target.type !== 'checkbox') {
+                        const checkbox = card.querySelector('input[type="checkbox"]');
+                        checkbox.checked = !checkbox.checked;
+                        updateSelection(checkbox);
+                    }
+                });
+                grid.appendChild(card);
+            });
+        }
+
+        function setupEventListeners() {
+            document.getElementById('setTokenBtn').addEventListener('click', setToken);
+            document.getElementById('hfToken').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') setToken();
+            });
+            document.getElementById('selectAllBtn').addEventListener('click', selectAll);
+            document.getElementById('runBenchmarkBtn').addEventListener('click', runBenchmark);
+            document.getElementById('closeInspectorBtn').addEventListener('click', closeInspector);
+
+            document.querySelectorAll('input[type="checkbox"][data-tc-id]').forEach(cb => {
+                cb.addEventListener('change', (e) => updateSelection(e.target));
+            });
+        }
+
+        function setToken() {
+            const input = document.getElementById('hfToken');
+            hfToken = input.value.trim();
+            const dot = document.getElementById('tokenStatusDot');
+            const text = document.getElementById('tokenStatusText');
+            if (hfToken) {
+                dot.classList.add('active');
+                text.textContent = 'Token set';
+                updateRunButton();
+            } else {
+                dot.classList.remove('active');
+                text.textContent = 'No token set';
+                updateRunButton();
+            }
+        }
+
+        function selectAll() {
+            const checkboxes = document.querySelectorAll('input[type="checkbox"][data-tc-id]');
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            checkboxes.forEach(cb => {
+                cb.checked = !allChecked;
+                updateSelection(cb);
+            });
+        }
+
+        function updateSelection(checkbox) {
+            const tcId = checkbox.dataset.tcId;
+            if (checkbox.checked) {
+                selectedTestCases.add(tcId);
+            } else {
+                selectedTestCases.delete(tcId);
+            }
+            updateRunButton();
+        }
+
+        function updateRunButton() {
+            const btn = document.getElementById('runBenchmarkBtn');
+            btn.disabled = !hfToken || selectedTestCases.size === 0;
+        }
+
+        /* === BENCHMARK EXECUTION === */
+        async function runBenchmark() {
+            if (!hfToken || selectedTestCases.size === 0) return;
+
+            const selectedCases = TEST_CASES.filter(tc => selectedTestCases.has(tc.id));
+            allResults = [];
+
+            showProgress(selectedCases);
+            hideResults();
+            hideSummary();
+
+            for (const testCase of selectedCases) {
+                const caseResults = await runTestCase(testCase);
+                allResults.push(...caseResults);
+            }
+
+            hideProgress();
+            showResults();
+            showSummary();
+        }
+
+        function showProgress(testCases) {
+            const section = document.getElementById('progressSection');
+            const grid = document.getElementById('progressGrid');
+            section.classList.add('active');
+
+            grid.innerHTML = '<div class="progress-header">Test Case</div>';
+            STRATEGIES.forEach(s => {
+                grid.innerHTML += `<div class="progress-header">${s.label}</div>`;
+            });
+
+            testCases.forEach(tc => {
+                grid.innerHTML += `<div class="progress-cell">${tc.label}</div>`;
+                STRATEGIES.forEach(s => {
+                    grid.innerHTML += `<div class="progress-cell running" id="prog_${tc.id}_${s.id}">⏳ Running</div>`;
+                });
+            });
+        }
+
+        function updateProgress(testCaseId, strategyId, status, text) {
+            const cell = document.getElementById(`prog_${testCaseId}_${strategyId}`);
+            if (cell) {
+                cell.className = `progress-cell ${status}`;
+                cell.textContent = text;
+            }
+        }
+
+        function hideProgress() {
+            document.getElementById('progressSection').classList.remove('active');
+        }
+
+        async function runTestCase(testCase) {
+            const promises = STRATEGIES.map(strategy => 
+                runStrategy(testCase, strategy)
+            );
+
+            const results = await Promise.allSettled(promises);
+            return results.map((result, idx) => {
+                if (result.status === 'fulfilled') {
+                    return result.value;
+                } else {
+                    return {
+                        testCaseId: testCase.id,
+                        testCaseLabel: testCase.label,
+                        strategy: STRATEGIES[idx].id,
+                        strategyLabel: STRATEGIES[idx].label,
+                        status: 'error',
+                        error_message: result.reason?.message || 'Unknown error',
+                        latency_ms: 0,
+                        output_text: '',
+                        token_estimate_input: estimateTokens(testCase.input),
+                        token_estimate_output: 0,
+                        is_summarized: false,
+                        quality_score: null
+                    };
+                }
+            });
+        }
+
+        async function runStrategy(testCase, strategy) {
+            const startTime = Date.now();
+
+            if (strategy.id === 'code_only') {
+                updateProgress(testCase.id, strategy.id, 'success', '✅ Done');
+                return {
+                    testCaseId: testCase.id,
+                    testCaseLabel: testCase.label,
+                    strategy: strategy.id,
+                    strategyLabel: strategy.label,
+                    status: 'success',
+                    latency_ms: 0,
+                    output_text: testCase.input,
+                    token_estimate_input: estimateTokens(testCase.input),
+                    token_estimate_output: estimateTokens(testCase.input),
+                    is_summarized: false,
+                    quality_score: null,
+                    error_message: null
+                };
+            }
+
+            try {
+                updateProgress(testCase.id, strategy.id, 'running', '⏳ Running');
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+                const response = await fetch(strategy.url, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${hfToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        inputs: testCase.input,
+                        parameters: {
+                            max_length: 120,
+                            min_length: 30,
+                            do_sample: false
+                        }
+                    }),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    let errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                    try {
+                        const errorData = await response.clone().text();
+                        if (errorData) {
+                            try {
+                                const parsed = JSON.parse(errorData);
+                                if (parsed.error) {
+                                    errorMsg += ` - ${parsed.error}`;
+                                } else if (parsed.message) {
+                                    errorMsg += ` - ${parsed.message}`;
+                                }
+                            } catch (e) {
+                                // Not JSON, use text as-is if short
+                                if (errorData.length < 100) {
+                                    errorMsg += ` - ${errorData}`;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore errors reading response body
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                const data = await response.json();
+                const latency = Date.now() - startTime;
+                const outputText = Array.isArray(data) && data[0]?.summary_text 
+                    ? data[0].summary_text 
+                    : (typeof data === 'string' ? data : JSON.stringify(data));
+
+                const isSummarized = isMeaningfullySummarized(testCase.input, outputText);
+                const qualityScore = calculateQualityScore(testCase.input, outputText);
+
+                updateProgress(testCase.id, strategy.id, 'success', '✅ Done');
+
+                return {
+                    testCaseId: testCase.id,
+                    testCaseLabel: testCase.label,
+                    strategy: strategy.id,
+                    strategyLabel: strategy.label,
+                    status: 'success',
+                    latency_ms: latency,
+                    output_text: outputText,
+                    token_estimate_input: estimateTokens(testCase.input),
+                    token_estimate_output: estimateTokens(outputText),
+                    is_summarized: isSummarized,
+                    quality_score: qualityScore,
+                    error_message: null
+                };
+            } catch (error) {
+                const latency = Date.now() - startTime;
+                let status = 'error';
+                let statusText = '❌ Error';
+
+                if (error.name === 'AbortError') {
+                    status = 'timeout';
+                    statusText = '⏱ Timeout';
+                }
+
+                updateProgress(testCase.id, strategy.id, status, statusText);
+
+                return {
+                    testCaseId: testCase.id,
+                    testCaseLabel: testCase.label,
+                    strategy: strategy.id,
+                    strategyLabel: strategy.label,
+                    status: status,
+                    latency_ms: latency,
+                    output_text: '',
+                    token_estimate_input: estimateTokens(testCase.input),
+                    token_estimate_output: 0,
+                    is_summarized: false,
+                    quality_score: null,
+                    error_message: error.message || 'Unknown error'
+                };
+            }
+        }
+
+        /* === METRICS CALCULATION === */
+        function estimateTokens(text) {
+            if (!text) return 0;
+            const words = text.trim().split(/\s+/).length;
+            return Math.round(words * 1.3);
+        }
+
+        function isMeaningfullySummarized(input, output) {
+            if (!output || output === input) return false;
+            const inputWords = input.trim().split(/\s+/).length;
+            const outputWords = output.trim().split(/\s+/).length;
+            return outputWords < inputWords * 0.9 && output !== input;
+        }
+
+        function calculateQualityScore(input, output) {
+            if (!output || output === input) return 0;
+
+            let score = 0;
+            const inputWords = input.trim().split(/\s+/);
+            const outputWords = output.trim().split(/\s+/);
+
+            // Compression ratio (20 pts)
+            const compressionRatio = 1 - (outputWords.length / inputWords.length);
+            if (compressionRatio >= 0.4) {
+                score += 20;
+            } else {
+                score += (compressionRatio / 0.4) * 20;
+            }
+
+            // Keyword retention (40 pts)
+            const stopwords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them']);
+            const significantWords = inputWords.filter(w => w.length > 4 && !stopwords.has(w.toLowerCase()));
+            const outputLower = output.toLowerCase();
+            const matchedKeywords = significantWords.filter(w => outputLower.includes(w.toLowerCase())).length;
+            score += (matchedKeywords / Math.max(significantWords.length, 1)) * 40;
+
+            // No hallucination proxy (20 pts)
+            const inputCapitals = new Set(input.match(/\b[A-Z][a-z]+\b/g) || []);
+            const outputCapitals = output.match(/\b[A-Z][a-z]+\b/g) || [];
+            const newCapitals = outputCapitals.filter(c => !inputCapitals.has(c));
+            score += Math.max(0, 20 - (newCapitals.length * 5));
+
+            // Coherence (20 pts)
+            if (/^[A-Z]/.test(output.trim())) score += 10;
+            if (/[.!?]$/.test(output.trim())) score += 5;
+            const commonVerbs = ['asked', 'explored', 'discussed', 'focused', 'covered', 'showed', 'requested', 'sought', 'needed', 'wanted'];
+            if (commonVerbs.some(v => outputLower.includes(v))) score += 5;
+
+            return Math.min(100, Math.round(score));
+        }
+
+        /* === RESULTS DISPLAY === */
+        function showResults() {
+            const section = document.getElementById('resultsSection');
+            const tbody = document.getElementById('resultsTableBody');
+            section.classList.add('active');
+
+            tbody.innerHTML = '';
+            allResults.forEach(result => {
+                const row = document.createElement('tr');
+                row.dataset.resultIndex = allResults.indexOf(result);
+
+                const compression = result.token_estimate_input > 0 
+                    ? ((1 - result.token_estimate_output / result.token_estimate_input) * 100).toFixed(1) + '%'
+                    : 'N/A';
+
+                const latencyClass = result.strategy === 'code_only' ? '' 
+                    : result.latency_ms < 1000 ? 'fast'
+                    : result.latency_ms < 3000 ? 'medium'
+                    : 'slow';
+
+                const qualityBar = result.quality_score !== null 
+                    ? `<div class="quality-bar">
+                        <div class="quality-fill ${result.quality_score >= 60 ? '' : result.quality_score >= 40 ? 'medium' : 'low'}" 
+                             style="width: ${result.quality_score}%"></div>
+                       </div>${result.quality_score}`
+                    : '<span style="color: #6b7280;">Baseline</span>';
+
+                row.innerHTML = `
+                    <td>${result.testCaseLabel}</td>
+                    <td>${result.strategyLabel}</td>
+                    <td><span class="status-badge ${result.status}">${result.status}</span></td>
+                    <td>${result.token_estimate_input}</td>
+                    <td>${result.token_estimate_output}</td>
+                    <td>${compression}</td>
+                    <td class="latency ${latencyClass}">${result.strategy === 'code_only' ? 'N/A' : result.latency_ms + 'ms'}</td>
+                    <td style="color: #ef4444; max-width: 300px; white-space: normal; word-break: break-word;" title="${result.error_message || ''}">${result.error_message || '-'}</td>
+                    <td>${result.is_summarized ? '✅' : '❌'}</td>
+                    <td>${qualityBar}</td>
+                    <td><span class="output-preview" data-result-index="${allResults.indexOf(result)}">${(result.output_text || '').substring(0, 120)}${result.output_text && result.output_text.length > 120 ? '...' : ''}</span></td>
+                `;
+
+                row.querySelector('.output-preview')?.addEventListener('click', () => {
+                    showInspector(result);
+                });
+
+                tbody.appendChild(row);
+            });
+        }
+
+        function hideResults() {
+            document.getElementById('resultsSection').classList.remove('active');
+        }
+
+        /* === SUMMARY DISPLAY === */
+        function showSummary() {
+            const section = document.getElementById('summarySection');
+            const cards = document.getElementById('strategyCards');
+            const verdict = document.getElementById('verdict');
+            section.classList.add('active');
+
+            cards.innerHTML = '';
+            STRATEGIES.forEach(strategy => {
+                const strategyResults = allResults.filter(r => r.strategy === strategy.id);
+                const successful = strategyResults.filter(r => r.status === 'success');
+                const avgLatency = successful.length > 0 && strategy.id !== 'code_only'
+                    ? Math.round(successful.reduce((sum, r) => sum + r.latency_ms, 0) / successful.length)
+                    : null;
+                const avgQuality = successful.length > 0 && strategy.id !== 'code_only'
+                    ? Math.round(successful.filter(r => r.quality_score !== null).reduce((sum, r) => sum + (r.quality_score || 0), 0) / successful.filter(r => r.quality_score !== null).length)
+                    : null;
+                const errorRate = strategyResults.length > 0
+                    ? ((strategyResults.filter(r => r.status !== 'success').length / strategyResults.length) * 100).toFixed(1)
+                    : '0.0';
+
+                const card = document.createElement('div');
+                card.className = 'strategy-card';
+                card.innerHTML = `
+                    <h3>${strategy.label}</h3>
+                    <div class="strategy-metric">
+                        <label>Average Latency</label>
+                        <value>${avgLatency !== null ? avgLatency + 'ms' : 'N/A'}</value>
+                    </div>
+                    <div class="strategy-metric">
+                        <label>Average Quality Score</label>
+                        <value>${avgQuality !== null ? avgQuality : 'N/A'}</value>
+                    </div>
+                    <div class="strategy-metric">
+                        <label>Error Rate</label>
+                        <value>${errorRate}%</value>
+                    </div>
+                `;
+                cards.appendChild(card);
+            });
+
+            const verdictText = generateVerdict();
+            const has401Errors = allResults.some(r => r.error_message && r.error_message.includes('401'));
+            
+            if (has401Errors) {
+                verdict.innerHTML = `<div style="background: #f59e0b20; border-left: 4px solid #f59e0b; padding: 12px; margin-bottom: 16px; border-radius: 4px; color: #f59e0b;">
+                    <strong>⚠️ Authentication Error:</strong> All HuggingFace API calls returned HTTP 401 (Unauthorized). 
+                    Please verify your token is valid and has not expired. You can get a new token from 
+                    <a href="https://huggingface.co/settings/tokens" target="_blank" style="color: #00d4aa;">HuggingFace Settings</a>.
+                </div>${verdictText}`;
+            } else {
+                verdict.textContent = verdictText;
+            }
+        }
+
+        function hideSummary() {
+            document.getElementById('summarySection').classList.remove('active');
+        }
+
+        function generateVerdict() {
+            const hfStrategies = ['falconsai', 'distilbart', 'bart_large'];
+            const avgScores = {};
+            const avgLatencies = {};
+
+            hfStrategies.forEach(s => {
+                const sResults = allResults.filter(r => r.strategy === s && r.status === 'success' && r.quality_score !== null);
+                if (sResults.length > 0) {
+                    avgScores[s] = sResults.reduce((sum, r) => sum + r.quality_score, 0) / sResults.length;
+                    avgLatencies[s] = sResults.reduce((sum, r) => sum + r.latency_ms, 0) / sResults.length;
+                }
+            });
+
+            const bestHF = Object.keys(avgScores).sort((a, b) => avgScores[b] - avgScores[a])[0];
+
+            if (!bestHF || avgScores[bestHF] < 45) {
+                return "⚠️ All HF models underperform on structured inputs — consider code-only";
+            } else if (avgScores[bestHF] >= 45 && avgLatencies[bestHF] < 4000) {
+                const bestLabel = STRATEGIES.find(s => s.id === bestHF)?.label || bestHF;
+                return `🏆 Best model: ${bestLabel} — highest quality with acceptable latency`;
+            } else {
+                return "💡 Recommendation: Skip HF call — code-only produces cleaner output for this input format";
+            }
+        }
+
+        /* === OUTPUT INSPECTOR === */
+        function showInspector(result) {
+            const overlay = document.getElementById('inspectorOverlay');
+            const content = document.getElementById('inspectorContent');
+            overlay.classList.add('active');
+
+            const testCase = TEST_CASES.find(tc => tc.id === result.testCaseId);
+            const diff = generateDiff(testCase.input, result.output_text);
+
+            content.innerHTML = `
+                <div class="inspector-section">
+                    <h3>Test Case</h3>
+                    <div class="text-box">${result.testCaseLabel}</div>
+                </div>
+                <div class="inspector-section">
+                    <h3>Strategy</h3>
+                    <div class="text-box">${result.strategyLabel}</div>
+                </div>
+                <div class="inspector-section">
+                    <h3>Input Text</h3>
+                    <div class="text-box">${escapeHtml(testCase.input)}</div>
+                </div>
+                <div class="inspector-section">
+                    <h3>Output Text</h3>
+                    <div class="text-box">${escapeHtml(result.output_text || '(empty)')}</div>
+                </div>
+                <div class="inspector-section">
+                    <h3>Diff View</h3>
+                    <div class="text-box">${diff}</div>
+                </div>
+                <div class="inspector-section">
+                    <h3>Metrics</h3>
+                    <div class="text-box">
+Status: ${result.status}
+Latency: ${result.latency_ms}ms
+Input Tokens: ${result.token_estimate_input}
+Output Tokens: ${result.token_estimate_output}
+Compression: ${result.token_estimate_input > 0 ? ((1 - result.token_estimate_output / result.token_estimate_input) * 100).toFixed(1) + '%' : 'N/A'}
+Summarized: ${result.is_summarized ? 'Yes' : 'No'}
+Quality Score: ${result.quality_score !== null ? result.quality_score : 'N/A'}
+${result.error_message ? 'Error: ' + result.error_message : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function closeInspector() {
+            document.getElementById('inspectorOverlay').classList.remove('active');
+        }
+
+        function generateDiff(input, output) {
+            if (!output) return escapeHtml(input);
+            
+            const inputWords = input.split(/(\s+)/);
+            const outputWords = output.split(/(\s+)/);
+            const outputLower = output.toLowerCase();
+            
+            let html = '';
+            inputWords.forEach(word => {
+                if (/\s+/.test(word)) {
+                    html += word;
+                } else if (!outputLower.includes(word.toLowerCase())) {
+                    html += `<span class="diff-highlight diff-removed">${escapeHtml(word)}</span>`;
+                } else {
+                    html += escapeHtml(word);
+                }
+            });
+            
+            const newWords = outputWords.filter(w => !/\s+/.test(w) && !input.toLowerCase().includes(w.toLowerCase()));
+            if (newWords.length > 0) {
+                html += ' <span class="diff-highlight diff-added">[Added: ' + escapeHtml(newWords.join(' ')) + ']</span>';
+            }
+            
+            return html;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Close inspector on overlay click
+        document.getElementById('inspectorOverlay').addEventListener('click', (e) => {
+            if (e.target.id === 'inspectorOverlay') {
+                closeInspector();
+            }
+        });
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>
