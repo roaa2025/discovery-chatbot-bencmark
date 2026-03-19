@@ -177,9 +177,14 @@
             font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
             color: #6b7280;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #0b0d12;
+            border: 1px solid #202232;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 160px;
+            overflow: auto;
         }
 
         .select-all-btn {
@@ -326,6 +331,11 @@
             color: #f59e0b;
         }
 
+        .status-badge.skipped {
+            background: #6b728020;
+            color: #9ca3af;
+        }
+
         .latency {
             font-weight: 600;
         }
@@ -367,10 +377,12 @@
         }
 
         .output-preview {
-            max-width: 200px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            max-width: 520px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            display: block;
+            max-height: 140px;
+            overflow: auto;
             cursor: pointer;
             color: #00d4aa;
         }
@@ -649,6 +661,14 @@
             }
         ];
 
+        // Only skip HF summarization for truly tiny histories. If we skip too aggressively,
+        // we don't benchmark models on valid short-but-real inputs.
+        const SHORT_INPUT_SKIP_TOKENS = 20;
+
+        function isSkippedResult(result) {
+            return typeof result?.error_message === 'string' && result.error_message.startsWith('Skipped:');
+        }
+
         /* === STATE === */
         let hfToken = '';
         let selectedTestCases = new Set();
@@ -670,7 +690,7 @@
                     <input type="checkbox" id="tc_${tc.id}" data-tc-id="${tc.id}">
                     <label for="tc_${tc.id}">${tc.label}</label>
                     <div class="description">${tc.description}</div>
-                    <div class="preview">${tc.input.substring(0, 100)}...</div>
+                    <div class="preview">${escapeHtml(tc.input)}</div>
                 `;
                 card.addEventListener('click', (e) => {
                     if (e.target.type !== 'checkbox') {
@@ -697,18 +717,32 @@
             });
         }
 
+        function sanitizeToken(rawToken) {
+            if (!rawToken) return { token: '', cleaned: false };
+            const trimmed = rawToken.trim();
+            const withoutBearer = trimmed.replace(/^Bearer\s+/i, '');
+            const noWhitespace = withoutBearer.replace(/\s+/g, '');
+            const asciiOnly = noWhitespace.replace(/[^\x20-\x7E]/g, '');
+            return {
+                token: asciiOnly,
+                cleaned: asciiOnly !== trimmed
+            };
+        }
+
         function setToken() {
             const input = document.getElementById('hfToken');
-            hfToken = input.value.trim();
+            const { token, cleaned } = sanitizeToken(input.value);
+            hfToken = token;
+            input.value = token;
             const dot = document.getElementById('tokenStatusDot');
             const text = document.getElementById('tokenStatusText');
             if (hfToken) {
                 dot.classList.add('active');
-                text.textContent = 'Token set';
+                text.textContent = cleaned ? 'Token set (cleaned hidden chars)' : 'Token set';
                 updateRunButton();
             } else {
                 dot.classList.remove('active');
-                text.textContent = 'No token set';
+                text.textContent = cleaned ? 'Invalid token format' : 'No token set';
                 updateRunButton();
             }
         }
@@ -771,7 +805,7 @@
             testCases.forEach(tc => {
                 grid.innerHTML += `<div class="progress-cell">${tc.label}</div>`;
                 STRATEGIES.forEach(s => {
-                    grid.innerHTML += `<div class="progress-cell running" id="prog_${tc.id}_${s.id}">⏳ Running</div>`;
+                    grid.innerHTML += `<div class="progress-cell running" id="prog_${tc.id}_${s.id}">Running</div>`;
                 });
             });
         }
@@ -820,7 +854,7 @@
             const startTime = Date.now();
 
             if (strategy.id === 'code_only') {
-                updateProgress(testCase.id, strategy.id, 'success', '✅ Done');
+                updateProgress(testCase.id, strategy.id, 'success', 'Done');
                 return {
                     testCaseId: testCase.id,
                     testCaseLabel: testCase.label,
@@ -838,10 +872,34 @@
             }
 
             try {
-                updateProgress(testCase.id, strategy.id, 'running', '⏳ Running');
+                updateProgress(testCase.id, strategy.id, 'running', 'Running');
+
+                // For very small inputs, summarization models tend to expand or hallucinate.
+                // Skip HF and return the original input deterministically.
+                const inputTokenEstimate = estimateTokens(testCase.input);
+                if (inputTokenEstimate < SHORT_INPUT_SKIP_TOKENS) {
+                    updateProgress(testCase.id, strategy.id, 'success', 'Skipped (short input)');
+                    return {
+                        testCaseId: testCase.id,
+                        testCaseLabel: testCase.label,
+                        strategy: strategy.id,
+                        strategyLabel: strategy.label,
+                        status: 'skipped',
+                        latency_ms: 0,
+                        output_text: testCase.input,
+                        token_estimate_input: inputTokenEstimate,
+                        token_estimate_output: inputTokenEstimate,
+                        is_summarized: false,
+                        quality_score: 0,
+                        error_message: 'Skipped: short input (returned input)'
+                    };
+                }
                 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+                // Avoid forcing long outputs on shorter inputs.
+                const minLength = inputTokenEstimate < 120 ? 0 : 30;
 
                 const response = await fetch(strategy.url, {
                     method: 'POST',
@@ -853,7 +911,7 @@
                         inputs: testCase.input,
                         parameters: {
                             max_length: 120,
-                            min_length: 30,
+                            min_length: minLength,
                             do_sample: false
                         }
                     }),
@@ -896,7 +954,7 @@
                 const isSummarized = isMeaningfullySummarized(testCase.input, outputText);
                 const qualityScore = calculateQualityScore(testCase.input, outputText);
 
-                updateProgress(testCase.id, strategy.id, 'success', '✅ Done');
+                updateProgress(testCase.id, strategy.id, 'success', 'Done');
 
                 return {
                     testCaseId: testCase.id,
@@ -915,11 +973,11 @@
             } catch (error) {
                 const latency = Date.now() - startTime;
                 let status = 'error';
-                let statusText = '❌ Error';
+                let statusText = 'Error';
 
                 if (error.name === 'AbortError') {
                     status = 'timeout';
-                    statusText = '⏱ Timeout';
+                    statusText = 'Timeout';
                 }
 
                 updateProgress(testCase.id, strategy.id, status, statusText);
@@ -989,7 +1047,7 @@
             const commonVerbs = ['asked', 'explored', 'discussed', 'focused', 'covered', 'showed', 'requested', 'sought', 'needed', 'wanted'];
             if (commonVerbs.some(v => outputLower.includes(v))) score += 5;
 
-            return Math.min(100, Math.round(score));
+            return Math.max(0, Math.min(100, Math.round(score)));
         }
 
         /* === RESULTS DISPLAY === */
@@ -1026,11 +1084,11 @@
                     <td>${result.token_estimate_input}</td>
                     <td>${result.token_estimate_output}</td>
                     <td>${compression}</td>
-                    <td class="latency ${latencyClass}">${result.strategy === 'code_only' ? 'N/A' : result.latency_ms + 'ms'}</td>
+                    <td class="latency ${latencyClass}">${result.strategy === 'code_only' || result.status === 'skipped' ? 'N/A' : result.latency_ms + 'ms'}</td>
                     <td style="color: #ef4444; max-width: 300px; white-space: normal; word-break: break-word;" title="${result.error_message || ''}">${result.error_message || '-'}</td>
-                    <td>${result.is_summarized ? '✅' : '❌'}</td>
+                    <td>${result.is_summarized ? 'Yes' : 'No'}</td>
                     <td>${qualityBar}</td>
-                    <td><span class="output-preview" data-result-index="${allResults.indexOf(result)}">${(result.output_text || '').substring(0, 120)}${result.output_text && result.output_text.length > 120 ? '...' : ''}</span></td>
+                    <td><span class="output-preview" data-result-index="${allResults.indexOf(result)}">${escapeHtml(result.output_text || '(empty)')}</span></td>
                 `;
 
                 row.querySelector('.output-preview')?.addEventListener('click', () => {
@@ -1055,15 +1113,16 @@
             cards.innerHTML = '';
             STRATEGIES.forEach(strategy => {
                 const strategyResults = allResults.filter(r => r.strategy === strategy.id);
-                const successful = strategyResults.filter(r => r.status === 'success');
+                const successful = strategyResults.filter(r => r.status === 'success' && !isSkippedResult(r));
                 const avgLatency = successful.length > 0 && strategy.id !== 'code_only'
                     ? Math.round(successful.reduce((sum, r) => sum + r.latency_ms, 0) / successful.length)
                     : null;
                 const avgQuality = successful.length > 0 && strategy.id !== 'code_only'
                     ? Math.round(successful.filter(r => r.quality_score !== null).reduce((sum, r) => sum + (r.quality_score || 0), 0) / successful.filter(r => r.quality_score !== null).length)
                     : null;
-                const errorRate = strategyResults.length > 0
-                    ? ((strategyResults.filter(r => r.status !== 'success').length / strategyResults.length) * 100).toFixed(1)
+                const errorRateDenom = strategyResults.filter(r => !isSkippedResult(r)).length;
+                const errorRate = errorRateDenom > 0
+                    ? ((strategyResults.filter(r => r.status !== 'success' && !isSkippedResult(r)).length / errorRateDenom) * 100).toFixed(1)
                     : '0.0';
 
                 const card = document.createElement('div');
@@ -1110,7 +1169,7 @@
             const avgLatencies = {};
 
             hfStrategies.forEach(s => {
-                const sResults = allResults.filter(r => r.strategy === s && r.status === 'success' && r.quality_score !== null);
+                const sResults = allResults.filter(r => r.strategy === s && r.status === 'success' && r.quality_score !== null && !isSkippedResult(r));
                 if (sResults.length > 0) {
                     avgScores[s] = sResults.reduce((sum, r) => sum + r.quality_score, 0) / sResults.length;
                     avgLatencies[s] = sResults.reduce((sum, r) => sum + r.latency_ms, 0) / sResults.length;
