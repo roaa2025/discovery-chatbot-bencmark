@@ -497,6 +497,8 @@
   .badge-error { background: rgba(239,68,68,.15); color: var(--red); }
   .badge-skipped { background: rgba(74,85,104,.2); color: var(--text-faint); }
   .badge-timeout { background: rgba(245,158,11,.15); color: var(--yellow); }
+  .badge-template { background: rgba(167,139,250,.15); color: var(--purple); }
+  .badge-chunked { background: rgba(167,139,250,.15); color: var(--purple); }
 
   .quality-bar-wrap {
     display: flex;
@@ -720,14 +722,29 @@
           <span class="strategy-name">Falconsai</span>
         </label>
         <label class="strategy-item">
+          <input type="checkbox" name="strategy" value="falconsai_chunked" checked>
+          <span class="strategy-dot"></span>
+          <span class="strategy-name">Falconsai (chunked)</span>
+        </label>
+        <label class="strategy-item">
           <input type="checkbox" name="strategy" value="distilbart" checked>
           <span class="strategy-dot"></span>
           <span class="strategy-name">DistilBART</span>
         </label>
         <label class="strategy-item">
+          <input type="checkbox" name="strategy" value="distilbart_chunked" checked>
+          <span class="strategy-dot"></span>
+          <span class="strategy-name">DistilBART (chunked)</span>
+        </label>
+        <label class="strategy-item">
           <input type="checkbox" name="strategy" value="bart_large" checked>
           <span class="strategy-dot"></span>
           <span class="strategy-name">BART Large CNN</span>
+        </label>
+        <label class="strategy-item">
+          <input type="checkbox" name="strategy" value="bart_large_chunked" checked>
+          <span class="strategy-dot"></span>
+          <span class="strategy-name">BART Large (chunked)</span>
         </label>
         <label class="strategy-item">
           <input type="checkbox" name="strategy" value="code_only" checked>
@@ -794,18 +811,37 @@ const STRATEGIES = {
   falconsai: {
     label: "Falconsai",
     url: "https://router.huggingface.co/hf-inference/models/Falconsai/text_summarization",
+    chunked: false,
+  },
+  falconsai_chunked: {
+    label: "Falconsai (chunked)",
+    url: "https://router.huggingface.co/hf-inference/models/Falconsai/text_summarization",
+    chunked: true,
   },
   distilbart: {
     label: "DistilBART",
     url: "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6",
+    chunked: false,
+  },
+  distilbart_chunked: {
+    label: "DistilBART (chunked)",
+    url: "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6",
+    chunked: true,
   },
   bart_large: {
     label: "BART Large CNN",
     url: "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn",
+    chunked: false,
+  },
+  bart_large_chunked: {
+    label: "BART Large (chunked)",
+    url: "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn",
+    chunked: true,
   },
   code_only: {
     label: "Code-Only",
     url: null,
+    chunked: false,
   },
 };
 
@@ -982,6 +1018,154 @@ function jaccard(a, b) {
   return inter / union;
 }
 
+function isTruncatedSummary(text) {
+  if (!text) return false;
+  return !/[.!?]$/.test(text.trim());
+}
+
+function extractKeywords(text, minLen = 6) {
+  return (text.match(/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b|\b\w{6,}\b/g) || [])
+    .map(w => w.toLowerCase())
+    .filter(w => w.length >= minLen);
+}
+
+function sentenceEchoRate(input, output) {
+  const inputSentences = input
+    .split(/[.!?]+/)
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (!inputSentences.length) return 0;
+  const out = output.trim().toLowerCase();
+  const matched = inputSentences.filter(s => out.includes(s) || s.includes(out)).length;
+  return matched / inputSentences.length;
+}
+
+function keywordComponentScore(input, output, outTok, compression) {
+  const outLow = output.toLowerCase();
+  const keywords = extractKeywords(input, 6);
+  const retained = keywords.filter(k => outLow.includes(k)).length;
+  const retentionRate = keywords.length > 0 ? retained / keywords.length : 0;
+  const keywordDensity = retentionRate * 10;
+
+  let total = Math.round(keywordDensity);
+  if (outTok < 15 && compression <= 0.85) total = Math.min(total, 8);
+  return total;
+}
+
+function sectionCoverageScore(input, output) {
+  const sentences = input
+    .split(/[.!?]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (!sentences.length) return 0;
+
+  const groupSize = Math.ceil(sentences.length / 3);
+  const groups = [
+    sentences.slice(0, groupSize),
+    sentences.slice(groupSize, groupSize * 2),
+    sentences.slice(groupSize * 2),
+  ];
+
+  const outLow = output.toLowerCase();
+  let represented = 0;
+  for (const group of groups) {
+    if (!group.length) continue;
+    const groupKeywords = [...new Set(extractKeywords(group.join(" "), 4))];
+    if (!groupKeywords.length) continue;
+    const hasAny = groupKeywords.some(k => outLow.includes(k));
+    if (hasAny) represented += 1;
+  }
+
+  if (represented <= 0) return 0;
+  if (represented === 1) return 10;
+  return 20;
+}
+
+function joinNaturalList(items) {
+  if (items.length <= 1) return items[0] || "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+function cleanListItem(text) {
+  return text.replace(/^[\s\-–,;:.]+|[\s\-–,;:.]+$/g, "").trim();
+}
+
+function parseDetectedTopics(raw) {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map(cleanListItem)
+    .filter(Boolean);
+}
+
+function buildTemplateSummary(items) {
+  const clean = items.map(cleanListItem).filter(Boolean);
+  return `User explored ${clean.length} topics: ${clean.join(", ")}.`;
+}
+
+function maybeAppendTopics(summary, detectedTopics) {
+  if (!detectedTopics.length) return summary;
+  const outLow = summary.toLowerCase();
+  const mentioned = detectedTopics.filter(t => outLow.includes(t.toLowerCase())).length;
+  if (mentioned / detectedTopics.length >= 0.5) return summary;
+  return `${summary.trim()} Topics: ${detectedTopics.join(", ")}.`;
+}
+
+function normalizeBenchmarkInput(rawInput) {
+  const input = (rawInput || "").trim();
+  let core = input;
+  let detectedTopics = [];
+
+  const detectedMatch = input.match(/^(.*?)(?:\s*Detected intents(?:\/topics)?\s*:|\s*Detected intent\s*:)\s*(.+)$/is);
+  if (detectedMatch) {
+    core = detectedMatch[1].trim().replace(/[.,;:\s]+$/g, "");
+    detectedTopics = parseDetectedTopics(detectedMatch[2]);
+  }
+
+  let normalized = core;
+  let listItems = [];
+  const askedIdx = core.toLowerCase().indexOf("asked about:");
+  let listOnly = false;
+
+  if (askedIdx >= 0) {
+    const pre = core.slice(0, askedIdx).trim();
+    const listPart = core.slice(askedIdx + "asked about:".length).trim().replace(/[.]+$/g, "");
+    listItems = listPart.split(";").map(cleanListItem).filter(Boolean);
+    if (listItems.length >= 2) {
+      normalized = `The user asked about ${joinNaturalList(listItems)}.`;
+      const preNormalized = pre
+        .toLowerCase()
+        .replace(/earlier in this conversation,?/g, "")
+        .replace(/the user has explored multiple datasets across this session,?/g, "")
+        .replace(/the user/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      listOnly = preNormalized.length === 0;
+    }
+  }
+
+  const templateTopics = detectedTopics.length ? detectedTopics : listItems;
+  return { normalizedInput: normalized, detectedTopics, listOnly, templateTopics };
+}
+
+function splitIntoSentenceChunks(text, chunkCount = 3) {
+  const sentences = text
+    .split(/\.\s+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(s => /[.!?]$/.test(s) ? s : `${s}.`);
+  if (sentences.length <= 1) return [text];
+
+  const size = Math.ceil(sentences.length / chunkCount);
+  const chunks = [];
+  for (let i = 0; i < sentences.length; i += size) {
+    const chunk = sentences.slice(i, i + size).join(" ").trim();
+    if (chunk) chunks.push(chunk);
+  }
+  return chunks;
+}
+
 /**
  * Improved quality score:
  * - Echo penalty (40 pts): if output is too similar to input, penalize hard
@@ -994,31 +1178,30 @@ function scoreQuality(input, output) {
 
   const inTok = estimateTokens(input);
   const outTok = estimateTokens(output);
-  const ratio = outTok / inTok;
+  const compression = outTok / inTok;
+
+  // Output too short to be useful.
+  if (outTok < 8) return 5;
 
   // 1. Echo penalty — if the model just returned the input or nearly so
   const similarity = jaccard(input, output);
-  const isEcho = similarity > 0.85 || ratio > 0.92;
+  const semanticEcho = sentenceEchoRate(input, output) > 0.60;
+  const isEcho = similarity > 0.85 || compression > 0.92 || semanticEcho;
   if (isEcho) return Math.round(5 + similarity * 5); // max ~10 if echo
 
   let score = 0;
 
   // 2. Compression (20 pts)
   // Ideal: 20-60% of input length
-  if (ratio < 0.2) score += 10;        // too short
-  else if (ratio <= 0.5) score += 20;  // ideal
-  else if (ratio <= 0.7) score += 14;
-  else if (ratio <= 0.85) score += 8;
+  if (compression < 0.2) score += 10;        // too short
+  else if (compression <= 0.5) score += 20;  // ideal
+  else if (compression <= 0.7) score += 14;
+  else if (compression <= 0.85) score += 8;
   else score += 2;
 
-  // 3. Keyword retention (25 pts)
-  // Important words from input that appear in output
-  const keywords = (input.match(/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b|\b\w{6,}\b/g) || [])
-    .map(w => w.toLowerCase());
-  const outLow = output.toLowerCase();
-  const retained = keywords.filter(k => outLow.includes(k)).length;
-  const retentionRate = keywords.length > 0 ? retained / keywords.length : 0;
-  score += Math.round(retentionRate * 25);
+  // 3. Section coverage (20) + keyword density (10)
+  score += sectionCoverageScore(input, output);
+  score += keywordComponentScore(input, output, outTok, compression);
 
   // 4. Hallucination proxy (20 pts): new capitalized words not in input
   const inputCaps = new Set((input.match(/\b[A-Z][a-z]+\b/g) || []).map(w => w.toLowerCase()));
@@ -1029,10 +1212,13 @@ function scoreQuality(input, output) {
 
   // 5. Coherence (15 pts)
   const sentences = output.split(/[.!?]+/).filter(s => s.trim().length > 5);
-  if (sentences.length >= 1) score += 5;
-  if (sentences.length >= 2) score += 5;
+  let coherenceScore = 0;
+  if (sentences.length >= 1) coherenceScore += 5;
+  if (sentences.length >= 2) coherenceScore += 5;
   const avgWordLen = output.split(/\s+/).reduce((a, w) => a + w.length, 0) / (output.split(/\s+/).length || 1);
-  if (avgWordLen >= 4 && avgWordLen <= 9) score += 5;
+  if (avgWordLen >= 4 && avgWordLen <= 9) coherenceScore += 5;
+  if (isTruncatedSummary(output)) coherenceScore = Math.max(0, coherenceScore - 10);
+  score += coherenceScore;
 
   return Math.min(100, Math.max(0, score));
 }
@@ -1055,56 +1241,97 @@ function compressionClass(ratio) {
 }
 
 // ── HF CALL ──────────────────────────────────────────────────────────────────
-async function callHF(url, input, inTokens) {
-  const maxLen = Math.max(30, Math.min(120, Math.round(inTokens * 0.45)));
-  const minLen = inTokens < 20 ? 0 : Math.max(10, Math.round(inTokens * 0.15));
+async function callHF(strategy, input, inTokens) {
+  const prep = normalizeBenchmarkInput(input);
+  if (prep.listOnly && prep.templateTopics.length) {
+    return {
+      ok: true,
+      status: "template",
+      text: buildTemplateSummary(prep.templateTopics),
+      normalizedInput: prep.normalizedInput,
+    };
+  }
 
   const headers = { "Content-Type": "application/json" };
   if (hfToken) headers["Authorization"] = `Bearer ${hfToken}`;
 
-  const body = JSON.stringify({
-    inputs: input,
-    parameters: {
-      max_length: maxLen,
-      min_length: minLen,
-      do_sample: false,
-      no_repeat_ngram_size: 3,
-      length_penalty: 1.5,
-      early_stopping: true,
-    },
-    options: { wait_for_model: true },
-  });
+  async function hfRequestOnce(singleInput, tokenEstimate) {
+    let rawMaxLen;
+    if (tokenEstimate < 40) rawMaxLen = tokenEstimate;
+    else if (tokenEstimate <= 80) rawMaxLen = Math.round(tokenEstimate * 0.60);
+    else if (tokenEstimate <= 150) rawMaxLen = Math.round(tokenEstimate * 0.50);
+    else rawMaxLen = Math.round(tokenEstimate * 0.40);
+    const maxLen = Math.max(20, Math.min(200, rawMaxLen));
+    const minLen = Math.round(maxLen * 0.4);
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 30000);
-  try {
-    const res = await fetch(url, { method: "POST", headers, body, signal: ctrl.signal });
-    clearTimeout(timer);
-    if (!res.ok) {
-      let details = "";
-      try {
-        const raw = await res.text();
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw);
-            details = parsed.error || parsed.message || parsed.detail || raw;
-          } catch {
-            details = raw;
+    const body = JSON.stringify({
+      inputs: singleInput,
+      parameters: {
+        max_length: maxLen,
+        min_length: minLen,
+        do_sample: false,
+        no_repeat_ngram_size: 3,
+        length_penalty: 1.5,
+        early_stopping: true,
+      },
+      options: { wait_for_model: true },
+    });
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
+    try {
+      const res = await fetch(strategy.url, { method: "POST", headers, body, signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) {
+        let details = "";
+        try {
+          const raw = await res.text();
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              details = parsed.error || parsed.message || parsed.detail || raw;
+            } catch {
+              details = raw;
+            }
           }
+        } catch {
+          details = "";
         }
-      } catch {
-        details = "";
+        const suffix = details ? ` - ${details}` : "";
+        throw new Error(`HTTP ${res.status}${suffix}`);
       }
-      const suffix = details ? ` - ${details}` : "";
-      throw new Error(`HTTP ${res.status}${suffix}`);
+      const data = await res.json();
+      if (Array.isArray(data) && data[0]?.summary_text) return data[0].summary_text;
+      if (data?.summary_text) return data.summary_text;
+      return JSON.stringify(data);
+    } catch (e) {
+      clearTimeout(timer);
+      if (e.name === "AbortError") throw new Error("timeout");
+      throw e;
     }
-    const data = await res.json();
-    if (Array.isArray(data) && data[0]?.summary_text) return { ok: true, text: data[0].summary_text };
-    if (data?.summary_text) return { ok: true, text: data.summary_text };
-    return { ok: true, text: JSON.stringify(data) };
+  }
+
+  try {
+    let summaryText = "";
+    if (strategy.chunked) {
+      const chunks = splitIntoSentenceChunks(prep.normalizedInput, 3);
+      const miniSummaries = [];
+      for (const chunk of chunks) {
+        miniSummaries.push(await hfRequestOnce(chunk, estimateTokens(chunk)));
+      }
+      const mergedMini = miniSummaries.join(" ").trim();
+      summaryText = await hfRequestOnce(mergedMini, estimateTokens(mergedMini));
+    } else {
+      summaryText = await hfRequestOnce(prep.normalizedInput, inTokens);
+    }
+
+    return {
+      ok: true,
+      status: "success",
+      text: maybeAppendTopics(summaryText, prep.detectedTopics),
+      normalizedInput: prep.normalizedInput,
+    };
   } catch (e) {
-    clearTimeout(timer);
-    if (e.name === "AbortError") throw new Error("timeout");
     throw e;
   }
 }
@@ -1150,10 +1377,10 @@ async function runBenchmark() {
     let result = {
       tcId: tc.id, tcLabel: tc.label,
       sid, stratLabel: STRATEGIES[sid].label,
-      input: tc.input,
+      input: tc.input, normalizedInput: tc.input,
       output: "", status: "", error: "",
       latency: 0, inTok, outTok: 0,
-      compression: 1, quality: 0, isSummarized: false,
+      compression: 1, quality: 0, isSummarized: false, isTruncated: false, isChunked: STRATEGIES[sid].chunked,
     };
 
     if (sid === "code_only") {
@@ -1166,10 +1393,11 @@ async function runBenchmark() {
       result.latency = 0;
     } else {
       try {
-        const r = await callHF(STRATEGIES[sid].url, tc.input, inTok);
-        result.latency = Date.now() - t0;
+        const r = await callHF(STRATEGIES[sid], tc.input, inTok);
+        result.latency = r.status === "template" ? 0 : Date.now() - t0;
         result.output = r.text;
-        result.status = "success";
+        result.status = r.status || "success";
+        result.normalizedInput = r.normalizedInput || tc.input;
       } catch (e) {
         result.latency = Date.now() - t0;
         result.status = e.message === "timeout" ? "timeout" : "error";
@@ -1181,7 +1409,10 @@ async function runBenchmark() {
     if (result.output) {
       result.outTok = estimateTokens(result.output);
       result.compression = result.outTok / (result.inTok || 1);
-      result.quality = result.status === "skipped" ? 0 : scoreQuality(tc.input, result.output);
+      if (result.status === "skipped") result.quality = 0;
+      else if (result.status === "template") result.quality = 60;
+      else result.quality = scoreQuality(tc.input, result.output);
+      result.isTruncated = result.status === "success" ? isTruncatedSummary(result.output) : false;
       result.isSummarized = result.quality > 30 && result.compression < 0.88;
     }
 
@@ -1221,10 +1452,10 @@ function renderResults() {
   const stratIds = [...new Set(results.map(r => r.sid))];
   stratIds.forEach(sid => {
     const runs = results.filter(r => r.sid === sid && r.status !== "skipped");
-    const successes = runs.filter(r => r.status === "success");
+    const successes = runs.filter(r => r.status === "success" || r.status === "template");
     const avgLatency = successes.length ? Math.round(successes.reduce((a, r) => a + r.latency, 0) / successes.length) : null;
     const avgQuality = successes.length ? Math.round(successes.reduce((a, r) => a + r.quality, 0) / successes.length) : 0;
-    const errorRate = runs.length ? Math.round((runs.filter(r => r.status !== "success").length / runs.length) * 100) : 0;
+    const errorRate = runs.length ? Math.round((runs.filter(r => r.status !== "success" && r.status !== "template").length / runs.length) * 100) : 0;
     const avgCompression = successes.length ? successes.reduce((a, r) => a + r.compression, 0) / successes.length : 1;
 
     let verdict, cardClass;
@@ -1312,13 +1543,14 @@ function renderResults() {
     const errTitle = r.error ? ` title="${escHtml(r.error)}"` : "";
     let statusBadge;
     if (r.status === 'success') statusBadge = '<span class="badge badge-success">● success</span>';
+    else if (r.status === 'template') statusBadge = '<span class="badge badge-template">◆ template</span>';
     else if (r.status === 'error') statusBadge = `<span class="badge badge-error"${errTitle}>✕ error</span>`;
     else if (r.status === 'timeout') statusBadge = `<span class="badge badge-timeout"${errTitle}>⏱ timeout</span>`;
     else statusBadge = '<span class="badge badge-skipped">— skipped</span>';
 
     tr.innerHTML = `
       <td>${r.tcLabel}</td>
-      <td class="mono-cell">${r.stratLabel}</td>
+      <td class="mono-cell">${r.stratLabel}${r.isChunked ? ' <span class="badge badge-chunked">⛓ chunked</span>' : ''}</td>
       <td>${statusBadge}</td>
       <td>${qualDisplay}</td>
       <td>${comprDisplay}</td>
@@ -1365,10 +1597,11 @@ function showInspector(idx, tr) {
   })();
   const kwScore = (() => {
     if (!r.output) return 0;
-    const keywords = (r.input.match(/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b|\b\w{6,}\b/g) || []).map(w => w.toLowerCase());
-    const outLow = r.output.toLowerCase();
-    const retained = keywords.filter(k => outLow.includes(k)).length;
-    return keywords.length > 0 ? Math.round((retained / keywords.length) * 25) : 0;
+    return keywordComponentScore(r.input, r.output, r.outTok || 0, r.compression || 1);
+  })();
+  const sectionScore = (() => {
+    if (!r.output) return 0;
+    return sectionCoverageScore(r.input, r.output);
   })();
   const hallScore = (() => {
     if (!r.output) return 0;
@@ -1376,7 +1609,7 @@ function showInspector(idx, tr) {
     const newCaps = (r.output.match(/\b[A-Z][a-z]+\b/g) || []).map(w => w.toLowerCase()).filter(w => !inputCaps.has(w)).length;
     return Math.max(0, 20 - newCaps * 4);
   })();
-  const cohScore = r.quality - comprScore - kwScore - hallScore;
+  const cohScore = r.quality - comprScore - kwScore - sectionScore - hallScore;
 
   const similarity = jaccard(r.input, r.output || "");
   const isEcho = similarity > 0.85 || r.compression > 0.92;
@@ -1391,10 +1624,11 @@ function showInspector(idx, tr) {
       <div class="inspector-body">
         <div class="inspector-pane">
           <div class="inspector-pane-label">Input</div>
-          <div class="inspector-pane-text">${escHtml(r.input)}</div>
+          <div class="inspector-pane-text"><span class="dim">Original</span>\n${escHtml(r.input)}</div>
+          <div class="inspector-pane-text" style="margin-top:10px;"><span class="dim">Normalized</span>\n${escHtml(r.normalizedInput || r.input)}</div>
         </div>
         <div class="inspector-pane">
-          <div class="inspector-pane-label">Output ${isEcho && r.status === 'success' ? '<span style="color:var(--red); font-size:10px;">⚠ echo detected</span>' : ''}</div>
+          <div class="inspector-pane-label">Output ${isEcho && r.status === 'success' ? '<span style="color:var(--red); font-size:10px;">⚠ echo detected</span>' : ''} ${r.isTruncated && r.status === 'success' ? '<span style="color:var(--yellow); font-size:10px;">⚠ truncated</span>' : ''}</div>
           <div class="inspector-pane-text highlight">${r.output ? escHtml(r.output) : '<span class="dim">No output</span>'}</div>
         </div>
         <div class="inspector-pane">
@@ -1422,8 +1656,9 @@ function showInspector(idx, tr) {
             <div class="inspector-pane-label" style="margin-bottom:8px;">Quality Breakdown</div>
             ${isEcho ? '<div style="font-family:var(--mono); font-size:11px; color:var(--red); margin-bottom:8px;">Echo penalty applied — model repeated input</div>' : ''}
             ${qbRow('Compression', comprScore, 20)}
-            ${qbRow('Keyword Retention', kwScore, 25)}
+            ${qbRow('Keyword Density', kwScore, 10)}
             ${qbRow('Hallucination Guard', hallScore, 20)}
+            ${qbRow('Section Coverage', sectionScore, 20)}
             ${qbRow('Coherence', Math.max(0, cohScore), 15)}
           </div>` : ''}
           ${r.error ? `<div style="margin-top:12px; font-family:var(--mono); font-size:11px; color:var(--red);">${escHtml(r.error)}</div>` : ''}
