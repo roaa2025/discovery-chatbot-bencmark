@@ -187,6 +187,60 @@
             overflow: auto;
         }
 
+        .test-case-actions {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .card-btn {
+            padding: 6px 10px;
+            border-radius: 4px;
+            border: 1px solid #2d2d3a;
+            background: #151926;
+            color: #e4e4e7;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .card-btn:hover {
+            border-color: #00d4aa;
+            color: #00d4aa;
+        }
+
+        .card-btn.primary {
+            background: #00d4aa;
+            color: #0f1117;
+            border-color: #00d4aa;
+        }
+
+        .card-btn.primary:hover {
+            background: #00b894;
+            color: #0f1117;
+        }
+
+        .test-case-editor {
+            margin-top: 10px;
+            width: 100%;
+            min-height: 120px;
+            resize: vertical;
+            background: #0b0d12;
+            border: 1px solid #2d2d3a;
+            border-radius: 4px;
+            color: #e4e4e7;
+            padding: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            display: none;
+        }
+
+        .test-case-editor.active {
+            display: block;
+        }
+
         .select-all-btn {
             margin-bottom: 16px;
         }
@@ -690,15 +744,56 @@
                     <input type="checkbox" id="tc_${tc.id}" data-tc-id="${tc.id}">
                     <label for="tc_${tc.id}">${tc.label}</label>
                     <div class="description">${tc.description}</div>
-                    <div class="preview">${escapeHtml(tc.input)}</div>
+                    <div class="preview" id="preview_${tc.id}">${escapeHtml(tc.input)}</div>
+                    <textarea class="test-case-editor" id="editor_${tc.id}">${tc.input}</textarea>
+                    <div class="test-case-actions">
+                        <button class="card-btn primary" id="write_${tc.id}" type="button">Write</button>
+                        <button class="card-btn" id="save_${tc.id}" type="button" style="display:none;">Save</button>
+                        <button class="card-btn" id="cancel_${tc.id}" type="button" style="display:none;">Cancel</button>
+                    </div>
                 `;
                 card.addEventListener('click', (e) => {
-                    if (e.target.type !== 'checkbox') {
+                    const clickedAction = e.target.closest('button') || e.target.classList.contains('test-case-editor');
+                    if (e.target.type !== 'checkbox' && !clickedAction) {
                         const checkbox = card.querySelector('input[type="checkbox"]');
                         checkbox.checked = !checkbox.checked;
                         updateSelection(checkbox);
                     }
                 });
+
+                const writeBtn = card.querySelector(`#write_${tc.id}`);
+                const saveBtn = card.querySelector(`#save_${tc.id}`);
+                const cancelBtn = card.querySelector(`#cancel_${tc.id}`);
+                const editor = card.querySelector(`#editor_${tc.id}`);
+                const preview = card.querySelector(`#preview_${tc.id}`);
+
+                writeBtn.addEventListener('click', () => {
+                    editor.value = tc.input;
+                    editor.classList.add('active');
+                    saveBtn.style.display = 'inline-block';
+                    cancelBtn.style.display = 'inline-block';
+                    writeBtn.style.display = 'none';
+                });
+
+                saveBtn.addEventListener('click', () => {
+                    const updatedText = editor.value.trim();
+                    tc.input = updatedText || tc.input;
+                    preview.innerHTML = escapeHtml(tc.input);
+                    editor.value = tc.input;
+                    editor.classList.remove('active');
+                    saveBtn.style.display = 'none';
+                    cancelBtn.style.display = 'none';
+                    writeBtn.style.display = 'inline-block';
+                });
+
+                cancelBtn.addEventListener('click', () => {
+                    editor.value = tc.input;
+                    editor.classList.remove('active');
+                    saveBtn.style.display = 'none';
+                    cancelBtn.style.display = 'none';
+                    writeBtn.style.display = 'inline-block';
+                });
+
                 grid.appendChild(card);
             });
         }
@@ -775,6 +870,7 @@
         async function runBenchmark() {
             if (!hfToken || selectedTestCases.size === 0) return;
 
+            syncEditorsToTestCases();
             const selectedCases = TEST_CASES.filter(tc => selectedTestCases.has(tc.id));
             allResults = [];
 
@@ -790,6 +886,21 @@
             hideProgress();
             showResults();
             showSummary();
+        }
+
+        function syncEditorsToTestCases() {
+            TEST_CASES.forEach(tc => {
+                const editor = document.getElementById(`editor_${tc.id}`);
+                const preview = document.getElementById(`preview_${tc.id}`);
+                if (!editor) return;
+                const typed = editor.value.trim();
+                if (typed) {
+                    tc.input = typed;
+                    if (preview) {
+                        preview.innerHTML = escapeHtml(tc.input);
+                    }
+                }
+            });
         }
 
         function showProgress(testCases) {
